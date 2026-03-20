@@ -316,22 +316,24 @@ class Database:
         id_width = max(len("ID"), max(len(p.page_id) for p in pages))
         title_width = max(len("Наименование"), max(len(p.page_title) for p in pages))
         date_width = len("Дата редактирования")
-        sync_width = len("Обновлена")
-        attempts_width = len("Попытки")
+        status_width = len("Требует обновл.")
+        url_width = min(60, max(len("URL"), max(len(p.page_url or "") for p in pages)))
         
         # Выводим заголовок
-        print("\n" + "=" * (id_width + title_width + date_width + sync_width + attempts_width + 11))
-        print(f"{'ID':<{id_width}} | {'Наименование':<{title_width}} | {'Дата редактирования':<{date_width}} | {'Обновлена':<{sync_width}} | {'Попытки':<{attempts_width}}")
-        print("=" * (id_width + title_width + date_width + sync_width + attempts_width + 11))
+        print("\n" + "=" * (id_width + title_width + date_width + status_width + url_width + 11))
+        print(f"{'ID':<{id_width}} | {'Наименование':<{title_width}} | {'Дата редактирования':<{date_width}} | {'Требует обновл.':<{status_width}} | {'URL':<{url_width}}")
+        print("=" * (id_width + title_width + date_width + status_width + url_width + 11))
         
         # Выводим страницы
         for page in pages:
             date_formatted = format_date(page.last_edited_date)
             status = "✓" if page.needs_update else ""
-            attempts = str(page.update_attempts) if page.update_attempts > 0 else ""
-            print(f"{page.page_id:<{id_width}} | {page.page_title:<{title_width}} | {date_formatted:<{date_width}} | {status:<{sync_width}} | {attempts:<{attempts_width}}")
+            url_display = page.page_url if page.page_url else ""
+            if len(url_display) > url_width:
+                url_display = "..." + url_display[-(url_width-3):]
+            print(f"{page.page_id:<{id_width}} | {page.page_title:<{title_width}} | {date_formatted:<{date_width}} | {status:<{status_width}} | {url_display:<{url_width}}")
         
-        print("=" * (id_width + title_width + date_width + sync_width + attempts_width + 11))
+        print("=" * (id_width + title_width + date_width + status_width + url_width + 11))
         print(f"Всего страниц: {len(pages)}")
         
         needs_update_count = sum(1 for p in pages if p.needs_update)

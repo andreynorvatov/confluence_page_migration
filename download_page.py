@@ -1,6 +1,6 @@
 """
 Скрипт для скачивания страницы из Confluence.
-Сохраняет содержимое страницы в JSON для последующей загрузки в другой Confluence.
+Сохраняет содержимое страницы и вложения для последующей загрузки в другой Confluence.
 """
 
 import json
@@ -24,10 +24,62 @@ def load_confluence_config() -> dict:
     }
 
 
+def download_attachment(confluence: Confluence, attachment: dict, attachments_dir: Path) -> str:
+    """Скачивает вложение и возвращает относительный путь к файлу."""
+    filename = attachment.get("title")
+    download_url = attachment.get("_links", {}).get("download")
+    
+    if not download_url:
+        print(f"  ⚠ Нет URL для {filename}")
+        return None
+    
+    # Полный URL
+    if not download_url.startswith("http"):
+        download_url = confluence.url + download_url
+    
+    # Скачиваем файл
+    response = confluence._session.get(download_url, stream=True)
+    if response.status_code != 200:
+        print(f"  ⚠ Ошибка загрузки {filename}: {response.status_code}")
+        return None
+    
+    # Сохраняем
+    file_path = attachments_dir / filename
+    with open(file_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            f.write(chunk)
+    
+    print(f"  ✓ {filename}")
+    return filename
+
+
 def download_page(confluence: Confluence, page_id: str, output_dir: str = "downloads") -> dict:
-    """Скачивает страницу из Confluence."""
+    """Скачивает страницу из Confluence со всеми вложениями."""
     page = confluence.get_page_by_id(page_id, expand="body.storage,version,space,ancestors")
     attachments = confluence.get(f"rest/api/content/{page_id}/child/attachment")
+    
+    # Создаём директорию для страницы
+    page_dir = Path(output_dir) / f"page_{page_id}"
+    page_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Создаём директорию для вложений
+    attachments_dir = page_dir / "files"
+    attachments_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Скачиваем вложения
+    downloaded_attachments = []
+    attachment_results = attachments.get("results", []) if attachments else []
+    
+    if attachment_results:
+        print(f"Загрузка {len(attachment_results)} вложений...")
+        for attachment in attachment_results:
+            saved_file = download_attachment(confluence, attachment, attachments_dir)
+            if saved_file:
+                downloaded_attachments.append({
+                    "title": attachment.get("title"),
+                    "filename": saved_file,
+                    "mediaType": attachment.get("metadata", {}).get("mediaType"),
+                })
     
     page_data = {
         "id": page.get("id"),
@@ -37,24 +89,26 @@ def download_page(confluence: Confluence, page_id: str, output_dir: str = "downl
             "name": page.get("space", {}).get("name"),
         },
         "version": page.get("version", {}).get("number"),
+        "last_modified": page.get("version", {}).get("when"),
         "body": {
             "storage": page.get("body", {}).get("storage", {}).get("value"),
             "representation": "storage",
         },
         "ancestors": [{"id": a.get("id"), "title": a.get("title")} for a in page.get("ancestors", [])],
-        "attachments": attachments.get("results", []) if attachments else [],
+        "attachments": downloaded_attachments,
+        "attachments_dir": "files",
         "downloaded_at": datetime.now().isoformat(),
     }
     
-    os.makedirs(output_dir, exist_ok=True)
-    output_file = Path(output_dir) / f"page_{page_id}.json"
+    # Сохраняем JSON
+    output_file = page_dir / f"page_{page_id}.json"
     
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(page_data, f, ensure_ascii=False, indent=2)
     
-    print(f"Страница '{page_data['title']}' (ID: {page_id}) успешно скачана")
-    print(f"Файл: {output_file}")
-    print(f"Вложений: {len(page_data['attachments'])}")
+    print(f"\nСтраница '{page_data['title']}' (ID: {page_id}) успешно скачана")
+    print(f"Папка: {page_dir}")
+    print(f"Вложений скачано: {len(downloaded_attachments)}")
     
     return page_data
 
