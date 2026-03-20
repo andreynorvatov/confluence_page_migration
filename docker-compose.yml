@@ -1,0 +1,56 @@
+services:
+  confluence:
+    image: atlassian/confluence:latest
+    container_name: confluence
+    ports:
+      - "8090:8090"
+    depends_on:
+      - postgresql
+    environment:
+      - ATL_PROXY_NAME=localhost
+      - ATL_PROXY_PORT=8090
+      - ATL_TOMCAT_PORT=8090
+      - ATL_JDBC_USER=confluence
+      - ATL_JDBC_PASSWORD=confluence
+      - ATL_JDBC_URL=jdbc:postgresql://postgresql:5432/confluence
+      - ATL_JDBC_DRIVER_CLASS=org.postgresql.Driver
+      - ATL_DB_TYPE=postgresql
+    volumes:
+      - confluence-data:/var/atlassian/confluence
+    networks:
+      - confluence-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8090/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  postgresql:
+    image: postgres:15
+    container_name: confluence-db
+    environment:
+      - POSTGRES_USER=confluence
+      - POSTGRES_PASSWORD=confluence
+      - POSTGRES_DB=confluence
+      - POSTGRES_ENCODING=UNICODE
+      - POSTGRES_COLLATE=C
+      - POSTGRES_COLLATE_TYPE=C
+    volumes:
+      - postgresql-data:/var/lib/postgresql/data
+    networks:
+      - confluence-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U confluence"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  confluence-data:
+    driver: local
+  postgresql-data:
+    driver: local
+
+networks:
+  confluence-net:
+    driver: bridge
