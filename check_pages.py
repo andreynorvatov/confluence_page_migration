@@ -1,6 +1,6 @@
 """
-Скрипт синхронизации страниц Confluence с локальной базой данных.
-Получает данные из Confluence, проверяет наличие в БД и отмечает обновлённые страницы.
+Скрипт проверки страниц Confluence.
+Получает данные из Confluence, проверяет наличие в БД и отмечает страницы, требующие обновления.
 """
 
 from dotenv import load_dotenv
@@ -84,8 +84,8 @@ def get_pages_tree(confluence: Confluence, space_key: str, root_page_id: str = N
     return pages
 
 
-def sync_pages(confluence: Confluence, db: Database, space_key: str, root_page_id: str = None):
-    """Синхронизирует страницы Confluence с базой данных."""
+def check_pages(confluence: Confluence, db: Database, space_key: str, root_page_id: str = None):
+    """Проверяет страницы Confluence и обновляет базу данных."""
     
     # Получаем страницы из Confluence
     print(f"Получение страниц из Confluence (пространство: {space_key})...")
@@ -98,7 +98,7 @@ def sync_pages(confluence: Confluence, db: Database, space_key: str, root_page_i
     # Формируем множество актуальных ID страниц
     current_page_ids = set()
     
-    # Синхронизируем каждую страницу
+    # Проверяем каждую страницу
     for page_data in confluence_pages:
         current_page_ids.add(page_data["id"])
         
@@ -108,6 +108,7 @@ def sync_pages(confluence: Confluence, db: Database, space_key: str, root_page_i
             last_edited_date=page_data["last_modified"],
             space_key=space_key,
             page_url=page_data.get("url"),
+            last_sync_date=None,  # check_pages не заполняет это поле
         )
         db.upsert_page(page)
     
@@ -118,7 +119,7 @@ def sync_pages(confluence: Confluence, db: Database, space_key: str, root_page_i
             db.mark_page_as_deleted(db_page.page_id)
             print(f"  Удалена страница: {db_page.page_title} (ID: {db_page.page_id})")
     
-    print("\nСинхронизация завершена")
+    print("\nПроверка завершена")
     
     # Выводим результат
     all_pages = db.get_all_pages()
@@ -167,7 +168,7 @@ def main():
     db = Database()
     
     try:
-        sync_pages(confluence, db, SPACE_KEY.upper(), ROOT_PAGE_ID or None)
+        check_pages(confluence, db, SPACE_KEY.upper(), ROOT_PAGE_ID or None)
     except Exception as e:
         print(f"Ошибка: {e}")
 
