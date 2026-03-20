@@ -1,0 +1,9 @@
+[project]
+name = "confluence-page-migration"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.14"
+dependencies = [
+    "atlassian-python-api>=4.0.7",
+    "python-dotenv>=1.0.0",
+]

@@ -1,0 +1,77 @@
+{
+  "id": "184077730",
+  "title": "Правила работы с SharePoint",
+  "space": {
+    "key": "DITM",
+    "name": "ДИТ Москва"
+  },
+  "version": 3,
+  "body": {
+    "storage": "<p><a class=\"ms-listlink\" href=\"https://sp.lanit.ru/dit/default.aspx?RootFolder=%2Fdit%2FShared%20Documents%2F%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D1%86%D0%B8%D1%8F%20%D0%9D%D0%A2&amp;FolderCTID=0x0120005472314397059944B0CC4FC20050E8B5&amp;View=%7B137209D6%2D73B4%2D48DA%2D9FE8%2D0BB249C2C716%7D\" style=\"text-decoration: underline;\">Документация НТ</a></p><p>Здесь ведется документация по текущим проектам.</p><p>Структура раздела: Продукт - Система - Услуга (если можно выделить) - Период (год, месяц) - Документация</p><p>Пример: Проект ГУ ЯВД в июне 2021 года</p><ul><li>Продукт - ГУ</li><li>Система - МПГУ</li><li>Услуга - ЯВД</li><li>Период - 202106</li></ul><p>Для выгрузки документации с ресурса заказчика необходимо нажать троеточие в правом верхнем углу и выбрать Export to Word или Export to PDF.</p><p><ac:image ac:height=\"400\"><ri:attachment ri:filename=\"image-2024-10-1_18-52-39.png\" /></ac:image></p><p>При необходимости можно добавить папку с входящей (исходной) документацией от Заказчика</p><p><a class=\"ms-listlink\" href=\"https://sp.lanit.ru/dit/default.aspx?RootFolder=%2Fdit%2FShared%20Documents%2F%D0%9E%D1%82%D1%87%D0%B5%D1%82%D1%8B%20%D0%BF%D0%BE%20%D0%93%D0%9E%D0%A1%D0%A2&amp;FolderCTID=0x0120005472314397059944B0CC4FC20050E8B5&amp;View=%7B137209D6%2D73B4%2D48DA%2D9FE8%2D0BB249C2C716%7D\" style=\"text-decoration: underline;\">Отчеты по ГОСТ</a></p><p>Здесь хранятся отчеты по шаблону ГОСТ (подробнее см. <ac:link><ri:page ri:content-title=\"Отчеты\" /></ac:link>)</p><p>Структура: Год отчетности - Отчеты ГОСТ</p><p><s>В каждой папке лежит сводная таблица excel за отчетный год. (не актуально начиная с 2023 года)</s></p><p><br /></p>",
+    "representation": "storage"
+  },
+  "ancestors": [
+    {
+      "id": "89981378",
+      "title": "ДИТ Москва"
+    },
+    {
+      "id": "92209311",
+      "title": "Нагрузочное тестирование"
+    },
+    {
+      "id": "165712109",
+      "title": "Общая информация"
+    }
+  ],
+  "attachments": [
+    {
+      "id": "475799960",
+      "type": "attachment",
+      "status": "current",
+      "title": "image-2024-10-1_18-52-39.png",
+      "metadata": {
+        "mediaType": "image/png",
+        "labels": {
+          "results": [],
+          "start": 0,
+          "limit": 200,
+          "size": 0,
+          "_links": {
+            "self": "https://wiki.lanit.ru/rest/api/content/475799960/label"
+          }
+        },
+        "_expandable": {
+          "currentuser": "",
+          "frontend": "",
+          "editorHtml": "",
+          "properties": ""
+        }
+      },
+      "extensions": {
+        "mediaType": "image/png",
+        "fileSize": 56883,
+        "comment": ""
+      },
+      "_links": {
+        "webui": "/pages/viewpage.action?pageId=184077730&preview=%2F184077730%2F475799960%2Fimage-2024-10-1_18-52-39.png",
+        "download": "/download/attachments/184077730/image-2024-10-1_18-52-39.png?version=1&modificationDate=1727790759903&api=v2",
+        "thumbnail": "/download/thumbnails/184077730/image-2024-10-1_18-52-39.png?api=v2",
+        "self": "https://wiki.lanit.ru/rest/api/content/475799960"
+      },
+      "_expandable": {
+        "container": "/rest/api/content/184077730",
+        "operations": "",
+        "children": "/rest/api/content/475799960/child",
+        "restrictions": "/rest/api/content/475799960/restriction/byOperation",
+        "history": "/rest/api/content/475799960/history",
+        "ancestors": "",
+        "body": "",
+        "version": "",
+        "descendants": "/rest/api/content/475799960/descendant",
+        "space": "/rest/api/space/DITM"
+      }
+    }
+  ],
+  "downloaded_at": "2026-03-20T15:57:07.670446"
+}
