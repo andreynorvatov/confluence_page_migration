@@ -42,6 +42,7 @@ def get_pages_tree(confluence: Confluence, space_key: str, root_page_id: str = N
     Получает список страниц пространства с указанной корневой страницей.
     """
     pages = []
+    base_url = confluence.url.rstrip('/')
     
     if root_page_id:
         def get_descendants(page_id: str):
@@ -54,6 +55,7 @@ def get_pages_tree(confluence: Confluence, space_key: str, root_page_id: str = N
                     "id": child.get("id"),
                     "title": child.get("title"),
                     "last_modified": child.get("version", {}).get("when"),
+                    "url": f"{base_url}/pages/viewpage.action?pageId={child.get('id')}",
                 }
                 pages.append(page_info)
                 get_descendants(child.get("id"))
@@ -65,6 +67,7 @@ def get_pages_tree(confluence: Confluence, space_key: str, root_page_id: str = N
                 "id": root_page.get("id"),
                 "title": root_page.get("title"),
                 "last_modified": root_page.get("version", {}).get("when"),
+                "url": f"{base_url}/pages/viewpage.action?pageId={root_page_id}",
             })
         
         get_descendants(root_page_id)
@@ -75,6 +78,7 @@ def get_pages_tree(confluence: Confluence, space_key: str, root_page_id: str = N
                 "id": page.get("id"),
                 "title": page.get("title"),
                 "last_modified": page.get("version", {}).get("when"),
+                "url": f"{base_url}/pages/viewpage.action?pageId={page.get('id')}",
             })
     
     return pages
@@ -91,28 +95,43 @@ def sync_pages(confluence: Confluence, db: Database, space_key: str, root_page_i
     confluence_pages = get_pages_tree(confluence, space_key, root_page_id)
     print(f"Найдено страниц: {len(confluence_pages)}")
     
-    # Сбрасываем флаг updated у всех страниц
-    db.mark_all_as_not_updated()
+    # Формируем множество актуальных ID страниц
+    current_page_ids = set()
     
     # Синхронизируем каждую страницу
     for page_data in confluence_pages:
+        current_page_ids.add(page_data["id"])
+        
         page = ConfluencePage(
-            id=page_data["id"],
-            title=page_data["title"],
-            last_modified=page_data["last_modified"],
+            page_id=page_data["id"],
+            page_title=page_data["title"],
+            last_edited_date=page_data["last_modified"],
+            space_key=space_key,
+            page_url=page_data.get("url"),
         )
         db.upsert_page(page)
+    
+    # Проверяем, не были ли удалены страницы, которые есть в БД
+    all_db_pages = db.get_all_pages(include_deleted=False)
+    for db_page in all_db_pages:
+        if db_page.page_id not in current_page_ids:
+            db.mark_page_as_deleted(db_page.page_id)
+            print(f"  Удалена страница: {db_page.page_title} (ID: {db_page.page_id})")
     
     print("\nСинхронизация завершена")
     
     # Выводим результат
     all_pages = db.get_all_pages()
-    updated_pages = db.get_updated_pages()
+    needs_update_pages = db.get_pages_needing_update()
+    error_pages = db.get_pages_with_errors()
     
     db.print_pages_table(all_pages, "Все страницы")
     
-    if updated_pages:
-        db.print_pages_table(updated_pages, "Обновлённые страницы")
+    if needs_update_pages:
+        db.print_pages_table(needs_update_pages, "Требуют обновления")
+    
+    if error_pages:
+        db.print_pages_table(error_pages, "С ошибками")
 
 
 def main():
