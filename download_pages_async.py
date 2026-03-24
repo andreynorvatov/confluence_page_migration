@@ -228,13 +228,12 @@ async def process_page(
         await download_page(session, confluence, page.page_id, output_dir)
 
         # Обновляем БД
-        page.needs_update = False
         page.last_sync_date = datetime.now().isoformat()
         page.update_attempts = 0
         page.last_update_error = None
         await db.update_page(page)
 
-        print(f"✓ БД обновлена: needs_update=0, last_sync_date={page.last_sync_date}")
+        print(f"✓ БД обновлена: last_sync_date={page.last_sync_date}")
         return True
 
     except Exception as e:
