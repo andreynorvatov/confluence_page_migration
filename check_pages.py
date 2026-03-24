@@ -3,6 +3,7 @@
 Получает данные из Confluence, проверяет наличие в БД и отмечает страницы, требующие обновления.
 """
 
+import time
 from dotenv import load_dotenv
 from atlassian import Confluence
 
@@ -143,7 +144,7 @@ def main():
         if not config["url"]:
             print("Ошибка: не указан CONFLUENCE_URL в .env")
             return
-        
+
         confluence = Confluence(
             url=config["url"],
             cookies={"seraph.confluence": config["cookie"]},
@@ -153,7 +154,7 @@ def main():
         if not config["url"]:
             print("Ошибка: не указан CONFLUENCE_URL в .env")
             return
-        
+
         confluence = Confluence(
             url=config["url"],
             username=config["username"],
@@ -167,10 +168,16 @@ def main():
     # Инициализируем базу данных
     db = Database()
     
+    # Замер времени выполнения
+    start_time = time.time()
+
     try:
         check_pages(confluence, db, SPACE_KEY.upper(), ROOT_PAGE_ID or None)
     except Exception as e:
         print(f"Ошибка: {e}")
+    
+    elapsed_time = time.time() - start_time
+    print(f"\n⏱ Время выполнения: {elapsed_time:.2f} сек")
 
 
 if __name__ == "__main__":

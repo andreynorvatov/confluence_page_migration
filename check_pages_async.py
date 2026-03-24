@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import time
 import aiohttp
 from dotenv import load_dotenv
 
@@ -21,7 +22,7 @@ SPACE_KEY = "ДИТ Москва"
 ROOT_PAGE_ID = "92209311"
 
 # Максимальное количество одновременных запросов (semaphore)
-MAX_CONCURRENT_REQUESTS = 10
+MAX_CONCURRENT_REQUESTS = 20
 
 # ================================================
 
@@ -41,136 +42,132 @@ def load_confluence_config() -> dict:
     }
 
 
-async def get_page_data(session: aiohttp.ClientSession, page_id: str, base_url: str, semaphore: asyncio.Semaphore) -> dict:
-    """Получает данные о странице через REST API."""
+async def fetch_page_and_children(
+    session: aiohttp.ClientSession,
+    page_id: str,
+    base_url: str,
+    semaphore: asyncio.Semaphore
+) -> tuple:
+    """Получает страницу и её дочерние страницы."""
     async with semaphore:
-        url = f"{base_url}/rest/api/content/{page_id}?expand=version"
-        async with session.get(url) as response:
-            if response.status != 200:
-                raise Exception(f"Ошибка получения страницы {page_id}: {response.status}")
+        try:
+            # Получаем данные страницы
+            async with session.get(f"{base_url}/rest/api/content/{page_id}?expand=version") as resp:
+                if resp.status != 200:
+                    return None, []
+                page_data = await resp.json()
             
-            data = await response.json()
+            # Получаем дочерние страницы
+            async with session.get(f"{base_url}/rest/api/content/{page_id}/child/page?expand=version") as resp:
+                children_data = await resp.json() if resp.status == 200 else {"results": []}
             
-            return {
-                "id": data.get("id"),
-                "title": data.get("title"),
-                "last_modified": data.get("version", {}).get("when"),
+            page_info = {
+                "id": page_data.get("id"),
+                "title": page_data.get("title"),
+                "last_modified": page_data.get("version", {}).get("when"),
                 "url": f"{base_url}/pages/viewpage.action?pageId={page_id}",
             }
-
-
-async def get_child_pages(session: aiohttp.ClientSession, page_id: str, base_url: str, semaphore: asyncio.Semaphore) -> list:
-    """Получает дочерние страницы через REST API."""
-    async with semaphore:
-        url = f"{base_url}/rest/api/content/{page_id}/child/page?expand=version"
-        async with session.get(url) as response:
-            if response.status != 200:
-                return []
             
-            data = await response.json()
-            results = data.get("results", [])
-            
-            return [
+            children = [
                 {
                     "id": child.get("id"),
                     "title": child.get("title"),
                     "last_modified": child.get("version", {}).get("when"),
                     "url": f"{base_url}/pages/viewpage.action?pageId={child.get('id')}",
                 }
-                for child in results
+                for child in children_data.get("results", [])
             ]
-
-
-async def get_descendants_recursive(
-    session: aiohttp.ClientSession,
-    page_id: str,
-    base_url: str,
-    semaphore: asyncio.Semaphore
-) -> list:
-    """Рекурсивно получает все дочерние страницы."""
-    pages = []
-    
-    children = await get_child_pages(session, page_id, base_url, semaphore)
-    
-    for child in children:
-        pages.append(child)
-        # Рекурсивно получаем потомков
-        descendants = await get_descendants_recursive(session, child["id"], base_url, semaphore)
-        pages.extend(descendants)
-    
-    return pages
+            
+            return page_info, children
+            
+        except Exception as e:
+            print(f"  ⚠ Ошибка получения страницы {page_id}: {e}")
+            return None, []
 
 
 async def get_pages_tree_async(config: dict, space_key: str, root_page_id: str = None) -> list:
     """
-    Получает список страниц пространства асинхронно.
+    Получает список страниц пространства асинхронно с использованием BFS.
     """
     base_url = config["url"]
     pages = []
-    
-    # Создаём сессию и semaphore для ограничения одновременных запросов
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
     
-    headers = {}
-    if config.get("cookie"):
-        headers["Cookie"] = f"seraph.confluence={config['cookie']}"
-    elif config.get("username") and config.get("token"):
-        from aiohttp import BasicAuth
+    headers = {"Cookie": f"seraph.confluence={config['cookie']}"} if config.get("cookie") else {}
     
     async with aiohttp.ClientSession(
         headers=headers,
-        auth=BasicAuth(config["username"], config["token"]) if config.get("username") and config.get("token") else None
+        auth=aiohttp.BasicAuth(config["username"], config["token"]) if config.get("username") and config.get("token") else None
     ) as session:
+        
         if root_page_id:
-            # Получаем корневую страницу
-            root_data = await get_page_data(session, root_page_id, base_url, semaphore)
-            pages.append(root_data)
+            # BFS обход дерева страниц
+            queue = [root_page_id]
+            processed = set()
             
-            # Получаем всех потомков рекурсивно
-            descendants = await get_descendants_recursive(session, root_page_id, base_url, semaphore)
-            pages.extend(descendants)
+            while queue:
+                # Берём текущий уровень
+                current_level = queue[:MAX_CONCURRENT_REQUESTS * 2]
+                queue = queue[MAX_CONCURRENT_REQUESTS * 2:]
+                
+                # Создаём задачи для всех страниц текущего уровня
+                tasks = [fetch_page_and_children(session, pid, base_url, semaphore) for pid in current_level]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                for page_id, result in zip(current_level, results):
+                    if page_id in processed:
+                        continue
+                    processed.add(page_id)
+                    
+                    if isinstance(result, Exception) or result[0] is None:
+                        continue
+                    
+                    page_info, children = result
+                    pages.append(page_info)
+                    
+                    # Добавляем детей в очередь
+                    for child in children:
+                        if child["id"] not in processed:
+                            queue.append(child["id"])
         else:
             # Получаем все страницы пространства
             url = f"{base_url}/rest/api/content?spaceKey={space_key}&expand=version&limit=100"
-            
-            async with semaphore:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        results = data.get("results", [])
-                        
-                        pages = [
-                            {
-                                "id": p.get("id"),
-                                "title": p.get("title"),
-                                "last_modified": p.get("version", {}).get("when"),
-                                "url": f"{base_url}/pages/viewpage.action?pageId={p.get('id')}",
-                            }
-                            for p in results
-                        ]
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    results = data.get("results", [])
+                    pages = [
+                        {
+                            "id": p.get("id"),
+                            "title": p.get("title"),
+                            "last_modified": p.get("version", {}).get("when"),
+                            "url": f"{base_url}/pages/viewpage.action?pageId={p.get('id')}",
+                        }
+                        for p in results
+                    ]
     
     return pages
 
 
 async def check_pages_async(config: dict, db: AsyncDatabase, space_key: str, root_page_id: str = None):
     """Проверяет страницы Confluence и обновляет базу данных."""
-    
+
     print(f"Получение страниц из Confluence (пространство: {space_key})...")
     if root_page_id:
         print(f"Корневая страница: {root_page_id}")
     print(f"Максимум одновременных запросов: {MAX_CONCURRENT_REQUESTS}")
-    
+
     # Получаем страницы из Confluence
     confluence_pages = await get_pages_tree_async(config, space_key, root_page_id)
     print(f"Найдено страниц: {len(confluence_pages)}")
-    
+
     # Формируем множество актуальных ID страниц
     current_page_ids = set()
-    
+
     # Проверяем каждую страницу
     for page_data in confluence_pages:
         current_page_ids.add(page_data["id"])
-        
+
         page = ConfluencePage(
             page_id=page_data["id"],
             page_title=page_data["title"],
@@ -180,26 +177,26 @@ async def check_pages_async(config: dict, db: AsyncDatabase, space_key: str, roo
             last_sync_date=None,
         )
         await db.upsert_page(page)
-    
+
     # Проверяем, не были ли удалены страницы, которые есть в БД
     all_db_pages = await db.get_all_pages(include_deleted=False)
     for db_page in all_db_pages:
         if db_page.page_id not in current_page_ids:
             await db.mark_page_as_deleted(db_page.page_id)
             print(f"  Удалена страница: {db_page.page_title} (ID: {db_page.page_id})")
-    
+
     print("\nПроверка завершена")
-    
+
     # Выводим результат
     all_pages = await db.get_all_pages()
     needs_update_pages = await db.get_pages_needing_update()
     error_pages = await db.get_pages_with_errors()
-    
+
     db.print_pages_table(all_pages, "Все страницы")
-    
+
     if needs_update_pages:
         db.print_pages_table(needs_update_pages, "Требуют обновления")
-    
+
     if error_pages:
         db.print_pages_table(error_pages, "С ошибками")
 
@@ -211,7 +208,7 @@ async def main():
     if not config.get("url"):
         print("Ошибка: не указан CONFLUENCE_URL в .env")
         return
-    
+
     if not config.get("cookie") and not (config.get("username") and config.get("token")):
         print("Ошибка: укажите CONFLUENCE_COOKIE или CONFLUENCE_USERNAME и CONFLUENCE_TOKEN в .env")
         return
@@ -219,11 +216,17 @@ async def main():
     # Инициализируем базу данных
     db = AsyncDatabase()
     await db._init_db()
-    
+
+    # Замер времени выполнения
+    start_time = time.perf_counter()
+
     try:
         await check_pages_async(config, db, SPACE_KEY.upper(), ROOT_PAGE_ID or None)
     except Exception as e:
         print(f"Ошибка: {e}")
+
+    elapsed_time = time.perf_counter() - start_time
+    print(f"\n⏱ Время выполнения: {elapsed_time:.2f} сек")
 
 
 if __name__ == "__main__":
