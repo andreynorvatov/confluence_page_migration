@@ -39,19 +39,48 @@ def load_confluence_config() -> dict:
 
 
 def upload_page(confluence: Confluence, file_path: str, page_data: dict, target_space: str, parent_id: str = None) -> dict:
-    """Загружает страницу в Confluence с вложениями."""
-
-    # Создаём страницу
-    new_page = confluence.create_page(
-        space=target_space,
-        title=page_data["title"],
-        body=page_data["body"]["storage"],
-        parent_id=parent_id,
-        representation="storage",
-    )
-
-    new_page_id = new_page.get("id")
-    print(f"Страница '{page_data['title']}' создана (ID: {new_page_id})")
+    """Загружает страницу в Confluence с вложениями.
+    
+    Если страница с таким заголовком уже существует в пространстве,
+    её контент будет обновлён.
+    """
+    title = page_data["title"]
+    
+    # Проверяем существование страницы
+    existing_page = confluence.get_page_by_title(space=target_space, title=title)
+    
+    if existing_page:
+        # Обновляем существующую страницу
+        page_id = existing_page["id"]
+        
+        # Определяем родительский ID
+        update_parent_id = parent_id
+        if not update_parent_id:
+            ancestors = existing_page.get("ancestors", [])
+            if ancestors:
+                update_parent_id = ancestors[-1].get("id") if isinstance(ancestors[-1], dict) else None
+        
+        confluence.update_page(
+            page_id=page_id,
+            title=title,
+            body=page_data["body"]["storage"],
+            representation="storage",
+            parent_id=update_parent_id,
+        )
+        print(f"Страница '{title}' обновлена (ID: {page_id})")
+        new_page = existing_page
+    else:
+        # Создаём новую страницу
+        new_page = confluence.create_page(
+            space=target_space,
+            title=title,
+            body=page_data["body"]["storage"],
+            parent_id=parent_id,
+            representation="storage",
+        )
+        print(f"Страница '{title}' создана (ID: {new_page.get('id')})")
+    
+    page_id = new_page.get("id")
 
     # Загружаем вложения
     attachments = page_data.get("attachments", [])
@@ -72,7 +101,7 @@ def upload_page(confluence: Confluence, file_path: str, page_data: dict, target_
                     filename=src_file,
                     name=filename,
                     content_type=attachment.get("mediaType", "application/octet-stream"),
-                    page_id=new_page_id,
+                    page_id=page_id,
                 )
                 print(f"  ✓ {filename}")
             except Exception as e:
