@@ -10,11 +10,59 @@ from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 from atlassian import Confluence
+import random
 
 import os
 import sys
 
 from db_async import AsyncDatabase, ConfluencePage
+
+
+async def retry_with_backoff(
+    func,
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 10.0,
+    exponential_base: float = 2.0,
+    jitter: bool = True,
+    retryable_exceptions: tuple = (aiohttp.ClientError, asyncio.TimeoutError)
+) -> any:
+    """
+    Выполняет функцию с ретраями и экспоненциальной задержкой.
+    
+    Args:
+        func: Асинхронная функция для выполнения
+        max_retries: Максимальное количество попыток
+        base_delay: Базовая задержка в секундах
+        max_delay: Максимальная задержка в секундах
+        exponential_base: База экспоненты для задержки
+        jitter: Добавлять случайную задержку для предотвращения thundering herd
+        retryable_exceptions: Кортеж исключений, при которых делать retry
+    
+    Returns:
+        Результат выполнения функции
+    """
+    last_exception = None
+    
+    for attempt in range(max_retries + 1):
+        try:
+            return await func()
+        except retryable_exceptions as e:
+            last_exception = e
+            
+            if attempt < max_retries:
+                # Рассчитываем задержку
+                delay = min(base_delay * (exponential_base ** attempt), max_delay)
+                if jitter:
+                    delay = delay * (0.5 + random.random())
+                
+                print(f"  ⚠ Ошибка (попытка {attempt + 1}/{max_retries + 1}): {e}")
+                print(f"  ⟳ Повтор через {delay:.2f}с...")
+                await asyncio.sleep(delay)
+            else:
+                print(f"  ✗ Превышено количество попыток ({max_retries + 1})")
+    
+    raise last_exception
 
 
 def load_confluence_config() -> dict:
@@ -46,19 +94,33 @@ async def download_attachment(
     if not download_url.startswith("http"):
         download_url = confluence_url + download_url
 
-    # Скачиваем файл
-    async with session.get(download_url) as response:
-        if response.status != 200:
-            print(f"  ⚠ Ошибка загрузки {filename}: {response.status}")
-            return None
+    async def _download():
+        async with session.get(download_url) as response:
+            if response.status != 200:
+                raise aiohttp.ClientResponseError(
+                    response.request_info,
+                    response.history,
+                    status=response.status,
+                    message=f"HTTP {response.status}"
+                )
+            
+            file_path = attachments_dir / filename
+            with open(file_path, "wb") as f:
+                f.write(await response.read())
+        
+        return filename
 
-        # Сохраняем
-        file_path = attachments_dir / filename
-        with open(file_path, "wb") as f:
-            f.write(await response.read())
-
-    print(f"  ✓ {filename}")
-    return filename
+    try:
+        result = await retry_with_backoff(
+            _download,
+            max_retries=3,
+            retryable_exceptions=(aiohttp.ClientError, asyncio.TimeoutError)
+        )
+        print(f"  ✓ {filename}")
+        return result
+    except Exception as e:
+        print(f"  ✗ Ошибка загрузки {filename} после всех попыток: {e}")
+        return None
 
 
 async def download_page(
@@ -68,8 +130,26 @@ async def download_page(
     output_dir: str = "downloads"
 ) -> dict:
     """Скачивает страницу из Confluence со всеми вложениями."""
-    page = confluence.get_page_by_id(page_id, expand="body.storage,version,space,ancestors")
-    attachments = confluence.get(f"rest/api/content/{page_id}/child/attachment")
+    
+    async def _get_page():
+        return confluence.get_page_by_id(page_id, expand="body.storage,version,space,ancestors")
+    
+    async def _get_attachments():
+        return confluence.get(f"rest/api/content/{page_id}/child/attachment")
+    
+    # Получаем страницу с ретраями
+    page = await retry_with_backoff(
+        _get_page,
+        max_retries=3,
+        retryable_exceptions=(aiohttp.ClientError, asyncio.TimeoutError, Exception)
+    )
+    
+    # Получаем вложения с ретраями
+    attachments = await retry_with_backoff(
+        _get_attachments,
+        max_retries=3,
+        retryable_exceptions=(aiohttp.ClientError, asyncio.TimeoutError, Exception)
+    )
 
     # Создаём директорию для страницы
     page_dir = Path(output_dir) / f"page_{page_id}"
