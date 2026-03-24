@@ -237,17 +237,26 @@ async def process_page(
     print(f"Обработка: {page.page_title} (ID: {page.page_id})")
     print(f"{'='*60}")
 
+    # Сохраняем оригинальный space_key, чтобы не перезаписать его
+    original_space_key = page.space_key
+    original_page_url = page.page_url
+
     try:
         # Скачиваем страницу
-        await download_page(session, confluence, page.page_id, output_dir)
+        page_data = await download_page(session, confluence, page.page_id, output_dir)
+
+        # Обновляем last_edited_date из last_modified в JSON
+        page.last_edited_date = page_data.get("last_modified")
 
         # Обновляем БД
         page.last_sync_date = datetime.now().isoformat()
         page.update_attempts = 0
         page.last_update_error = None
+        page.space_key = original_space_key  # Сохраняем оригинальный space_key
+        page.page_url = original_page_url    # Сохраняем оригинальный page_url
         await db.update_page(page)
 
-        print(f"✓ БД обновлена: last_sync_date={page.last_sync_date}")
+        print(f"✓ БД обновлена: last_sync_date={page.last_sync_date}, last_edited_date={page.last_edited_date}")
         return True
 
     except Exception as e:
@@ -256,6 +265,8 @@ async def process_page(
         # Обновляем БД с ошибкой
         page.update_attempts += 1
         page.last_update_error = str(e)
+        page.space_key = original_space_key  # Сохраняем оригинальный space_key
+        page.page_url = original_page_url    # Сохраняем оригинальный page_url
         await db.update_page(page)
 
         return False
