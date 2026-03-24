@@ -90,9 +90,12 @@ async def download_attachment(
         print(f"  ⚠ Нет URL для {filename}")
         return None
 
-    # Полный URL
+    # Полный URL - корректно объединяем
     if not download_url.startswith("http"):
-        download_url = confluence_url + download_url
+        # Убираем trailing slash у confluence_url и leading slash у download_url
+        base_url = confluence_url.rstrip("/")
+        download_path = download_url.lstrip("/")
+        download_url = f"{base_url}/{download_path}"
 
     async def _download():
         async with session.get(download_url) as response:
@@ -103,11 +106,22 @@ async def download_attachment(
                     status=response.status,
                     message=f"HTTP {response.status}"
                 )
-            
+
+            # Проверяем Content-Length для диагностики
+            content_length = response.headers.get("Content-Length")
+            if content_length and int(content_length) == 0:
+                raise aiohttp.ClientError(f"Пустой контент для {filename}")
+
             file_path = attachments_dir / filename
+            content = await response.read()
+            
+            # Проверяем, что контент не пустой
+            if not content:
+                raise aiohttp.ClientError(f"Получен пустой файл для {filename}")
+            
             with open(file_path, "wb") as f:
-                f.write(await response.read())
-        
+                f.write(content)
+
         return filename
 
     try:
@@ -280,8 +294,10 @@ async def main():
     output_dir = Path(__file__).parent / "downloads"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Асинхронно скачиваем страницы
-    async with aiohttp.ClientSession() as session:
+    # Асинхронно скачиваем страницы с cookie для аутентификации
+    async with aiohttp.ClientSession(
+        cookies={"seraph.confluence": config["cookie"]}
+    ) as session:
         tasks = [
             process_page(session, confluence, db, page, str(output_dir))
             for page in pages
