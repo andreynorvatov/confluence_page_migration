@@ -48,7 +48,7 @@ async def fetch_page_and_children(
     base_url: str,
     semaphore: asyncio.Semaphore
 ) -> tuple:
-    """Получает страницу и её дочерние страницы."""
+    """Получает страницу и её дочерние страницы с обработкой пагинации."""
     async with semaphore:
         try:
             # Получаем данные страницы
@@ -56,30 +56,49 @@ async def fetch_page_and_children(
                 if resp.status != 200:
                     return None, []
                 page_data = await resp.json()
+
+            # Получаем дочерние страницы с обработкой пагинации
+            children = []
+            start = 0
+            limit = 100  # Максимальный лимит для уменьшения количества запросов
             
-            # Получаем дочерние страницы
-            async with session.get(f"{base_url}/rest/api/content/{page_id}/child/page?expand=version") as resp:
-                children_data = await resp.json() if resp.status == 200 else {"results": []}
-            
+            while True:
+                url = f"{base_url}/rest/api/content/{page_id}/child/page?expand=version&start={start}&limit={limit}"
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        break
+                    children_data = await resp.json()
+                    results = children_data.get("results", [])
+                    
+                    if not results:
+                        break
+                    
+                    children.extend([
+                        {
+                            "id": str(child.get("id")),
+                            "title": child.get("title"),
+                            "last_modified": child.get("version", {}).get("when"),
+                            "url": f"{base_url}/pages/viewpage.action?pageId={child.get('id')}",
+                        }
+                        for child in results
+                    ])
+                    
+                    # Проверяем, есть ли ещё страницы
+                    next_link = children_data.get("_links", {}).get("next")
+                    if not next_link:
+                        break
+                    
+                    start += limit
+
             page_info = {
-                "id": page_data.get("id"),
+                "id": str(page_data.get("id")),
                 "title": page_data.get("title"),
                 "last_modified": page_data.get("version", {}).get("when"),
                 "url": f"{base_url}/pages/viewpage.action?pageId={page_id}",
             }
-            
-            children = [
-                {
-                    "id": child.get("id"),
-                    "title": child.get("title"),
-                    "last_modified": child.get("version", {}).get("when"),
-                    "url": f"{base_url}/pages/viewpage.action?pageId={child.get('id')}",
-                }
-                for child in children_data.get("results", [])
-            ]
-            
+
             return page_info, children
-            
+
         except Exception as e:
             print(f"  ⚠ Ошибка получения страницы {page_id}: {e}")
             return None, []
@@ -102,50 +121,75 @@ async def get_pages_tree_async(config: dict, space_key: str, root_page_id: str =
         
         if root_page_id:
             # BFS обход дерева страниц
-            queue = [root_page_id]
+            queue = [str(root_page_id)]
             processed = set()
-            
+
             while queue:
                 # Берём текущий уровень
                 current_level = queue[:MAX_CONCURRENT_REQUESTS * 2]
                 queue = queue[MAX_CONCURRENT_REQUESTS * 2:]
-                
+
                 # Создаём задачи для всех страниц текущего уровня
                 tasks = [fetch_page_and_children(session, pid, base_url, semaphore) for pid in current_level]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-                
+
                 for page_id, result in zip(current_level, results):
+                    # Нормализуем page_id к строке
+                    page_id = str(page_id)
+                    
                     if page_id in processed:
                         continue
                     processed.add(page_id)
-                    
-                    if isinstance(result, Exception) or result[0] is None:
+
+                    # Обработка ошибок
+                    if isinstance(result, Exception):
                         continue
                     
+                    if result[0] is None:
+                        continue
+
                     page_info, children = result
                     pages.append(page_info)
-                    
-                    # Добавляем детей в очередь
+
+                    # Добавляем детей в очередь (только необработанные)
                     for child in children:
-                        if child["id"] not in processed:
-                            queue.append(child["id"])
+                        child_id = str(child["id"])
+                        if child_id not in processed and child_id not in queue:
+                            queue.append(child_id)
         else:
-            # Получаем все страницы пространства
-            url = f"{base_url}/rest/api/content?spaceKey={space_key}&expand=version&limit=100"
-            async with session.get(url) as response:
-                if response.status == 200:
+            # Получаем все страницы пространства с обработкой пагинации
+            pages = []
+            start = 0
+            limit = 100
+            
+            while True:
+                url = f"{base_url}/rest/api/content?spaceKey={space_key}&expand=version&start={start}&limit={limit}"
+                async with session.get(url) as response:
+                    if response.status != 200:
+                        break
                     data = await response.json()
                     results = data.get("results", [])
-                    pages = [
+                    
+                    if not results:
+                        break
+                    
+                    pages.extend([
                         {
-                            "id": p.get("id"),
+                            "id": str(p.get("id")),
                             "title": p.get("title"),
                             "last_modified": p.get("version", {}).get("when"),
                             "url": f"{base_url}/pages/viewpage.action?pageId={p.get('id')}",
                         }
                         for p in results
-                    ]
-    
+                    ])
+                    
+                    # Проверяем, есть ли ещё страницы
+                    next_link = data.get("_links", {}).get("next")
+                    if not next_link:
+                        break
+                    
+                    start += limit
+
     return pages
 
 
@@ -161,15 +205,17 @@ async def check_pages_async(config: dict, db: AsyncDatabase, space_key: str, roo
     confluence_pages = await get_pages_tree_async(config, space_key, root_page_id)
     print(f"Найдено страниц: {len(confluence_pages)}")
 
-    # Формируем множество актуальных ID страниц
+    # Формируем множество актуальных ID страниц (нормализованных к строке)
     current_page_ids = set()
 
     # Проверяем каждую страницу
     for page_data in confluence_pages:
-        current_page_ids.add(page_data["id"])
+        # Нормализуем ID к строке
+        page_id = str(page_data["id"])
+        current_page_ids.add(page_id)
 
         page = ConfluencePage(
-            page_id=page_data["id"],
+            page_id=page_id,
             page_title=page_data["title"],
             last_edited_date=page_data["last_modified"],
             space_key=space_key,
@@ -181,7 +227,8 @@ async def check_pages_async(config: dict, db: AsyncDatabase, space_key: str, roo
     # Проверяем, не были ли удалены страницы, которые есть в БД
     all_db_pages = await db.get_all_pages(include_deleted=False)
     for db_page in all_db_pages:
-        if db_page.page_id not in current_page_ids:
+        # Нормализуем сравнение ID
+        if str(db_page.page_id) not in current_page_ids:
             await db.mark_page_as_deleted(db_page.page_id)
             print(f"  Удалена страница: {db_page.page_title} (ID: {db_page.page_id})")
 
